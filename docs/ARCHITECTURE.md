@@ -219,3 +219,32 @@ export function ConversationsDrawer(): JSX.Element; // abre via useUi.conversati
 export function NotificationCenter(): JSX.Element; export function ApprovalDialog(): JSX.Element;
 export function AuthGate(props: { children: ReactNode }): JSX.Element;
 ```
+
+## Fatos verificados da API do Gemini (testados em 16/10/2026 com uma chave real do plano gratuito)
+
+Modelos que existem de fato (`models.list`) — use estes IDs nas listas de preferência:
+- **Texto (chat):** `gemini-3.8-flash` (no teste devolveu **503 "high demand"** → o fallback é obrigatório), `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-flash-preview`, `gemini-flash-latest`, `gemini-2.5-flash`.
+- **Texto rápido (fast):** `gemini-3.5-flash-lite` (✅ respondeu em ~5 s), `gemini-3.1-flash-lite`, `gemini-flash-lite-latest`, `gemini-2.5-flash-lite`.
+- **TTS:** `gemini-3.8-flash-tts` (✅ ~2,7 s; **devolve `audio/wav` já com cabeçalho RIFF** — não embrulhe de novo), `gemini-3.1-flash-tts-preview` (✅ ~1,7 s; devolve `audio/l16; rate=24000; channels=1` = PCM cru que precisa de cabeçalho WAV), `gemini-3.8-flash-lite-tts`, `gemini-2.5-flash-preview-tts`. Trate os dois formatos pelo `mimeType`.
+- **Live (bidiGenerateContent):** `gemini-3.8-live`, `gemini-3.8-live-extended-thinking`, `gemini-3.1-flash-live-preview`, `gemini-2.5-flash-native-audio-latest`, `gemini-2.5-flash-native-audio-preview-12-2025`. Atenção: também têm bidiGenerateContent, mas NÃO servem para conversa: `gemini-3.5-transcribe-live` (só transcrição), `gemini-3.5-live-translate-preview`, `gemini-robotics-er-2-streaming-preview`, `lyria-realtime-exp` — exclua por nome.
+- **Embeddings:** `gemini-embedding-2` (✅ 3072 dimensões; use `outputDimensionality: 768` para economizar espaço), `gemini-embedding-001`. (Não existe `gemini-embedding-002`.)
+- **Transcrição:** `gemini-3.5-transcribe` (generateContent com áudio) — útil para STT de reserva.
+- Modelos `*-pro*` exigem cobrança: nunca escolha automaticamente.
+- O formato das chaves novas do AI Studio começa com `AQ.` (não só `AIza`). Não valide a chave por prefixo.
+
+## Persona: o Lärk é o alter ego do usuário (Lärk Skynner)
+
+O usuário tem um manual pessoal chamado **"Lärk Skynner — Manual do Alter Ego"**: o Lärk é a versão confiante, carismática e
+sem freio do próprio usuário (nome vem de *skylark*, a cotovia que canta enquanto sobe). O assistente encarna essa
+identidade além do papel de J.A.R.V.I.S.: calmo por dentro, animado por fora; voz do peito, grave, com pausas, frases que
+terminam em ponto final; humor que zoa a situação e a si mesmo, nunca humilha ninguém; bordão "Bora?"; lema "Quando eu falo
+oi, já venci."; "Medo é o ingresso."; chama a voz da insegurança de **"o Freio"** e responde a ela.
+
+O conteúdo integral do manual é **pessoal e NÃO vai para o repositório (que é público)**. Ele fica em
+`data/alter-ego.md` (pasta `data/` é ignorada pelo git). Regras:
+- `buildPersona` deve carregar `data/alter-ego.md` (se existir; caminho relativo à pasta do banco, `path.dirname(config.dbPath)`)
+  e incluí-lo no system instruction numa seção "MANUAL DO ALTER EGO DO USUÁRIO (conhecimento privado)", com cache por mtime.
+- A personalidade-base no código pode citar os traços gerais acima (são públicos e genéricos), mas nunca detalhes da vida
+  do usuário.
+- Os recursos de coach do programa (imersão de 14 dias, missões por nível, diário de votos, ritual) serão implementados numa
+  etapa seguinte — não precisam ser feitos agora.
