@@ -14,7 +14,8 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    proxy: { '/api': { target: 'http://localhost:8787', changeOrigin: true } },
+    // ws: true → o WebSocket da voz (/api/voice) também passa pelo proxy em desenvolvimento.
+    proxy: { '/api': { target: `http://localhost:${process.env.PORT || 8787}`, changeOrigin: true, ws: true } },
   },
   build: { outDir: r('./dist/web'), emptyOutDir: true },
 });
