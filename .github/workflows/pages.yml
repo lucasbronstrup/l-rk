@@ -1,0 +1,57 @@
+# Publica a edição web do Lärk no GitHub Pages (https://lucasbronstrup.github.io/l-rk/).
+# No Pages o navegador fala direto com a API do Gemini: voz humanizada, modo Live e microfone funcionam.
+name: Edição web (GitHub Pages)
+
+on:
+  push:
+    branches: [claude/blissful-bardeen-dy3ofp]
+    paths:
+      - 'web/**'
+      - 'shared/**'
+      - 'vite.standalone.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build da edição web (Pages)
+        run: npx vite build --config vite.standalone.config.ts
+        env:
+          LARK_TARGET: pages
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

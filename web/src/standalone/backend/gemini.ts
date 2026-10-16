@@ -289,7 +289,8 @@ export async function geminiTts(opts: { key: string; text: string; voiceName: st
   const pref = opts.preferredModel.trim().replace(/^models\//, '');
   const models = pref && /tts/i.test(pref) ? [pref, ...TTS_MODELS.filter((m) => m !== pref)] : TTS_MODELS;
   const style = opts.style.trim() || 'Voz grave, calorosa e confiante, ritmo de palestrante, pausas de efeito';
-  const prompt = `Fale em português do Brasil, com este estilo: ${style}.\n\n${opts.text}`;
+  // A direção vai como "audio tag" entre colchetes: instruções em prosa acabam lidas em voz alta.
+  const prompt = `[${style.replace(/[[\]]/g, '').replace(/\s+/g, ' ').slice(0, 160)}] ${opts.text}`;
   for (const model of models) {
     try {
       const res = await post(

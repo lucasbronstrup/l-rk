@@ -19,7 +19,8 @@ import type { Settings } from '../../shared/types.js';
 
 /** Limite de caracteres enviados ao TTS por pedido (o cliente já divide textos longos em blocos). */
 export const MAX_TTS_CHARS = 4000;
-const MAX_STYLE_CHARS = 800;
+/** A direção vira uma tag de áudio: curta o bastante para não ser lida em voz alta. */
+const MAX_STYLE_CHARS = 160;
 const TTS_TIMEOUT_MS = 60_000;
 const CACHE_MAX_ENTRIES = 50;
 const CACHE_MAX_BYTES = 30 * 1024 * 1024;
@@ -134,16 +135,14 @@ export function resolveVoiceDirection(settings: Settings, style?: string | null)
   return compact(settings.voiceStyle, MAX_STYLE_CHARS) || 'Palestrante carismático, voz calorosa e confiante, pausas de efeito';
 }
 
-/** Prompt do TTS: instruções de leitura separadas do texto para que o modelo não as leia em voz alta. */
+/**
+ * Prompt do TTS: a direção de estilo vai como "audio tag" entre colchetes antes do texto.
+ * Testado com a API real (gemini-3.8-flash-tts): instruções em prosa ("Leia em voz alta…", "Estilo: …")
+ * acabam lidas em voz alta junto com o texto; a tag entre colchetes só dirige a interpretação.
+ */
 export function buildTtsPrompt(text: string, direction: string): string {
-  return [
-    'Leia em voz alta, em português do Brasil, somente o texto que aparece depois de "TEXTO:".',
-    'Não leia estas instruções e não acrescente nem omita palavras.',
-    `Estilo de voz: ${direction}`,
-    '',
-    'TEXTO:',
-    text,
-  ].join('\n');
+  const tag = direction.replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim();
+  return tag ? `[${tag}] ${text}` : text;
 }
 
 // ─── Cache LRU ───────────────────────────────────────────────────────────

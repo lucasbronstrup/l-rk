@@ -121,11 +121,10 @@ describe('normalizeForSpeech', () => {
 });
 
 describe('prompt e direção de estilo', () => {
-  it('separa a direção do texto a ser lido', () => {
-    const prompt = buildTtsPrompt('Bom dia, Lucas.', 'voz grave e calorosa');
-    expect(prompt).toContain('português do Brasil');
-    expect(prompt).toContain('Estilo de voz: voz grave e calorosa');
-    expect(prompt.trimEnd().endsWith('TEXTO:\nBom dia, Lucas.')).toBe(true);
+  it('envia a direção como tag entre colchetes antes do texto (a API lê instruções em prosa em voz alta)', () => {
+    expect(buildTtsPrompt('Bom dia.', 'voz grave e calorosa')).toBe('[voz grave e calorosa] Bom dia.');
+    expect(buildTtsPrompt('Bom dia.', 'voz [grave]\n calma')).toBe('[voz grave calma] Bom dia.');
+    expect(buildTtsPrompt('Bom dia.', '')).toBe('Bom dia.');
   });
 
   it('usa o estilo pedido ou, na falta dele, a direção de voz da persona', () => {
@@ -153,7 +152,7 @@ describe('synthesizeSpeech', () => {
     expect(role).toBe('tts');
     expect(params.config.responseModalities).toEqual(['AUDIO']);
     expect(params.config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Charon');
-    expect(params.contents[0].parts[0].text).toContain('TEXTO:\nOlá, mundo. Tudo começa com uma pergunta.');
+    expect(params.contents[0].parts[0].text).toMatch(/^\[.+\] Olá, mundo\. Tudo começa com uma pergunta\.$/);
     expect(opts).toMatchObject({ maxAttempts: 3 });
   });
 
@@ -172,7 +171,7 @@ describe('synthesizeSpeech', () => {
     const first = h.generate.mock.calls[0] as GenerateArgs;
     const second = h.generate.mock.calls[1] as GenerateArgs;
     expect(first[1].config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Puck');
-    expect(first[1].contents[0].parts[0].text).toContain('Estilo de voz: animado');
+    expect(first[1].contents[0].parts[0].text).toBe('[animado] Primeira frase.');
     expect(second[1].config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe(DEFAULT_VOICE);
   });
 
