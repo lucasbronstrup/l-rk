@@ -10,6 +10,7 @@ import { CLAUDE_MODEL_LABEL, claudeStatus, loadSample, onClaudeChange, runClaude
 import { getApiKey, getSettings, onApiKeyChange } from './db';
 import { EngineError, type TurnInput, type TurnOutput } from './engine-types';
 import { GeminiUnreachable, TTS_MODELS, chatModelOrder, isGeminiUnreachable, resetGeminiReachability, runGeminiTurn } from './gemini';
+import { LIVE_MODELS } from './live';
 import { isAbort } from './util';
 
 export { EngineError } from './engine-types';
@@ -79,6 +80,7 @@ export function activeModels(): Partial<Record<ModelRole, string>> {
       chat: chatModelOrder(s.models.chat)[0],
       fast: 'gemini-3.5-flash-lite',
       tts: s.models.tts || TTS_MODELS[0],
+      live: s.models.live || LIVE_MODELS[0],
     };
   }
   if (state === 'claude') return { chat: CLAUDE_MODEL_LABEL };

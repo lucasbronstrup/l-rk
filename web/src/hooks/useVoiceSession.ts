@@ -8,13 +8,15 @@ import { resumeAudioContext } from '@/lib/audio/context';
 import { LEVEL_PRIORITY, setLevelSource } from '@/lib/audio/levels';
 import { startMicCapture, toMicError, type MicCapture } from '@/lib/audio/mic';
 import { PcmPlayer } from '@/lib/audio/player';
-import { SpeechRecognizer, isSpeechRecognitionSupported } from '@/lib/audio/recognition';
+import { SpeechRecognizer, isVoiceInputSupported } from '@/lib/audio/recognition';
 import { speak, stopSpeaking } from '@/lib/audio/speak';
 
 /**
  * Sessão do modo de voz.
  *  - LIVE: WebSocket /api/voice (Gemini Live) com microfone PCM16 16 kHz e voz PCM16 24 kHz.
  *  - CLÁSSICO (reserva automática): reconhecimento do navegador → chat → TTS, em laço.
+ *    Se o reconhecimento do navegador não existir ou não alcançar o serviço dele (Brave, Opera,
+ *    redes restritas), a fala é gravada e transcrita pelo Gemini (POST /api/transcribe).
  * O estado é global (zustand) para que a palavra de ativação, a sobreposição e o chat conversem.
  */
 
@@ -107,12 +109,33 @@ function send(rt: LiveRuntime, msg: VoiceClientMessage) {
   if (rt.ws.readyState === WebSocket.OPEN) rt.ws.send(JSON.stringify(msg));
 }
 
-/** Junta pedaços de transcrição: aceita tanto texto acumulado quanto incremental. */
+const normCaption = (t: string) =>
+  t
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+
+/** O texto novo é uma versão revisada (pontuada/corrigida) do anterior, não uma continuação. */
+function isRevision(prev: string, incoming: string): boolean {
+  const a = normCaption(prev);
+  const b = normCaption(incoming);
+  if (a.length < 4 || b.length < a.length * 0.8 || b.length > a.length * 1.25) return false;
+  let same = 0;
+  const n = Math.min(a.length, b.length);
+  while (same < n && a[same] === b[same]) same++;
+  let tail = 0;
+  while (tail < n - same && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  return (same + tail) / Math.max(a.length, b.length) >= 0.6;
+}
+
+/** Junta pedaços de transcrição: aceita texto acumulado, incremental ou revisado. */
 function mergeCaption(prev: string, incoming: string): string {
   if (!incoming) return prev;
   if (!prev) return incoming.trimStart();
   if (incoming.startsWith(prev)) return incoming;
   if (prev.endsWith(incoming)) return prev;
+  if (isRevision(prev, incoming)) return incoming.trimStart();
   const needsSpace = !/\s$/.test(prev) && !/^[\s,.!?;:…]/.test(incoming);
   return needsSpace ? `${prev} ${incoming}` : prev + incoming;
 }
@@ -120,10 +143,18 @@ function mergeCaption(prev: string, incoming: string): string {
 const ERROR_NOTICES: Record<string, string> = {
   quota: 'A cota gratuita da voz ao vivo se esgotou por agora. Sigo no modo clássico — outra engrenagem, a mesma conversa.',
   no_api_key:
-    'A voz ao vivo precisa da chave do Google AI Studio. Sigo no modo clássico; configure a chave em Configurações para a experiência completa.',
+    'A voz ao vivo precisa da chave do Google AI Studio. Sigo no modo clássico; cole-a em Configurações → Inteligência para a experiência completa.',
   provider: 'O serviço de voz ao vivo do Gemini não respondeu bem. Sigo no modo clássico, sem perder o fio da conversa.',
   internal: 'O canal de voz ao vivo falhou. Sigo no modo clássico, sem perder o fio da conversa.',
 };
+
+/** Aviso ao cair para o modo clássico: a mensagem do servidor (já em PT-BR e acionável) quando houver. */
+function liveErrorNotice(code: string | undefined, message: string | undefined): string {
+  const base = ERROR_NOTICES[code ?? 'internal'] ?? ERROR_NOTICES.internal;
+  const m = message?.trim();
+  if (!m || m.length > 420 || /^(gemini live:|error|erro interno)/i.test(m)) return base;
+  return /clássico/i.test(m) ? m : `${m} Enquanto isso, sigo no modo clássico.`;
+}
 
 // ─── Store ────────────────────────────────────────────────────────────────
 
@@ -464,9 +495,8 @@ function handleServerMessage(rt: LiveRuntime, msg: VoiceServerMessage) {
       break;
     }
     case 'error': {
-      const text = ERROR_NOTICES[msg.code ?? 'internal'] ?? ERROR_NOTICES.internal;
       if (msg.message) console.warn('[Lärk] Voz ao vivo:', msg.code, msg.message);
-      fallbackToClassic(rt.token, text);
+      fallbackToClassic(rt.token, liveErrorNotice(msg.code, msg.message));
       break;
     }
     case 'closed':
@@ -507,7 +537,7 @@ function fallbackToClassic(token: number, notice: string) {
 
 function startClassic(token: number, notice: string | null) {
   const store = useVoiceSession;
-  if (!isSpeechRecognitionSupported()) {
+  if (!isVoiceInputSupported(true)) {
     store.setState({
       engine: 'classic',
       status: 'error',
@@ -515,7 +545,7 @@ function startClassic(token: number, notice: string | null) {
       voice: null,
       notice: {
         tone: 'error',
-        text: `${notice ? `${notice} ` : ''}Porém este navegador não reconhece fala — use o Chrome ou o Edge, ou alterne para o texto.`,
+        text: `${notice ? `${notice} ` : ''}Porém este navegador não consegue ouvir o microfone por aqui. Abra o Lärk no Chrome ou no Edge — ou digite sua mensagem.`,
       },
     });
     setOrb('idle');
@@ -548,6 +578,24 @@ function startClassic(token: number, notice: string | null) {
     continuous: true,
     silenceMs: 1100,
     exclusive: true,
+    serverFallback: true,
+    onPhase: (phase) => {
+      if (rt.busy || runtime !== rt) return;
+      if (phase === 'speech') {
+        const s = store.getState();
+        if (s.userFinal) store.setState({ userCaption: '', assistantCaption: '', assistantFinal: true, tools: [] });
+        store.setState({ userFinal: false, status: 'listening' });
+        setOrb('listening');
+      } else if (phase === 'transcribing') {
+        store.setState({ userCaption: 'Transcrevendo…', userFinal: false, status: 'thinking' });
+        setOrb('thinking');
+      } else {
+        const s = store.getState();
+        if (!s.userFinal) store.setState({ userCaption: '', userFinal: true });
+        store.setState({ status: 'listening' });
+        setOrb('listening');
+      }
+    },
     onInterim: (text) => {
       if (rt.busy || runtime !== rt) return;
       const s = store.getState();
@@ -559,9 +607,19 @@ function startClassic(token: number, notice: string | null) {
     },
     onError: (kind, message) => {
       if (runtime !== rt) return;
-      const fatal = kind === 'denied' || kind === 'no-mic' || kind === 'unsupported' || kind === 'network';
+      const fatal = kind === 'denied' || kind === 'no-mic' || kind === 'unsupported' || kind === 'network' || kind === 'no-key';
       store.setState({ notice: { tone: fatal ? 'error' : 'warn', text: message }, ...(fatal ? { status: 'error' as const } : {}) });
-      if (fatal) setOrb('idle');
+      if (fatal) {
+        if (!store.getState().userFinal) store.setState({ userCaption: '', userFinal: true });
+        setOrb('idle');
+        playSfx('error');
+      } else if (!rt.busy) {
+        // Frase perdida na transcrição: volta a ouvir.
+        const s = store.getState();
+        if (!s.userFinal) store.setState({ userCaption: '', userFinal: true });
+        store.setState({ status: 'listening' });
+        setOrb('listening');
+      }
     },
   });
 

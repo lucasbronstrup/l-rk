@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   SpeechRecognizer,
-  isSpeechRecognitionSupported,
+  isVoiceInputSupported,
   type RecognitionErrorKind,
+  type RecognitionPhase,
 } from '@/lib/audio/recognition';
 import { startMicCapture, type MicCapture } from '@/lib/audio/mic';
 import { LEVEL_PRIORITY, setLevelSource } from '@/lib/audio/levels';
@@ -27,6 +28,8 @@ export interface UseSpeechRecognition {
   interim: string;
   error: string | null;
   errorKind: RecognitionErrorKind | null;
+  /** Reserva pelo Gemini: 'speech' enquanto capta a fala, 'transcribing' enquanto transcreve. */
+  phase: RecognitionPhase;
   start: () => void;
   stop: () => void;
   abort: () => void;
@@ -35,14 +38,17 @@ export interface UseSpeechRecognition {
 const LEVEL_KEY = 'dictation';
 
 /**
- * Reconhecimento de fala pt-BR (Web Speech API) como hook React.
+ * Reconhecimento de fala pt-BR como hook React: Web Speech API do navegador e, quando ela não
+ * existe ou não alcança o serviço dela (Brave, Opera, redes restritas), gravação + transcrição
+ * pelo Gemini (POST /api/transcribe).
  * Exclusivo: enquanto ativo, a palavra de ativação fica pausada.
  */
 export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}): UseSpeechRecognition {
   const optsRef = useRef(options);
   optsRef.current = options;
 
-  const [supported] = useState(isSpeechRecognitionSupported);
+  const [supported] = useState(() => isVoiceInputSupported(true));
+  const [phase, setPhase] = useState<RecognitionPhase>('idle');
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +94,10 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}):
       continuous: o.continuous ?? false,
       silenceMs: o.silenceMs ?? 0,
       exclusive: true,
+      serverFallback: true,
+      onPhase: (p) => {
+        if (recRef.current === rec) setPhase(p);
+      },
       onInterim: (text) => {
         setInterim(text);
         optsRef.current.onInterim?.(text);
@@ -102,6 +112,7 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}):
       },
       onStateChange: (on) => {
         setListening(on);
+        if (!on) setPhase('idle');
         if (on) {
           const ui = useUi.getState();
           if (!ui.voiceMode && ui.orbState !== 'speaking') ui.setOrbState('listening');
@@ -124,6 +135,7 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}):
     recRef.current = null;
     setListening(false);
     setInterim('');
+    setPhase('idle');
     releaseMic();
   }, [releaseMic]);
 
@@ -139,5 +151,5 @@ export function useSpeechRecognition(options: UseSpeechRecognitionOptions = {}):
     [],
   );
 
-  return { supported, listening, interim, error, errorKind, start, stop, abort };
+  return { supported, listening, interim, error, errorKind, phase, start, stop, abort };
 }

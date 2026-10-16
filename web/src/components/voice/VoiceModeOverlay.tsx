@@ -317,7 +317,7 @@ const STATUS_COPY: Record<VoiceStatus, { label: string; hint: string }> = {
   listening: { label: 'OUVINDO', hint: 'Fale naturalmente — eu acompanho.' },
   thinking: { label: 'PROCESSANDO', hint: 'Organizando o pensamento…' },
   speaking: { label: 'FALANDO', hint: 'Toque no núcleo ou pressione Espaço para interromper.' },
-  error: { label: 'CANAL INDISPONÍVEL', hint: 'Você pode continuar por texto enquanto isso.' },
+  error: { label: 'NÃO CONSIGO OUVIR', hint: 'Siga o aviso acima para resolver — ou toque em Texto e digite.' },
 };
 
 function StatusLine({ status, muted }: { status: VoiceStatus; muted: boolean }) {

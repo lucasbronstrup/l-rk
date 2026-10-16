@@ -75,7 +75,9 @@ async function callEmbedApi(
   taskType: EmbeddingTaskType,
   timeoutMs: number,
 ): Promise<Float32Array[]> {
-  const contents = texts.map((t) => (t.length > MAX_INPUT_CHARS ? t.slice(0, MAX_INPUT_CHARS) : t));
+  // Um Content por texto: com uma lista de strings, o SDK junta tudo num único Content para os modelos
+  // multimodais (gemini-embedding-2) e a API devolve UM vetor para o lote inteiro.
+  const contents = texts.map((t) => ({ role: 'user', parts: [{ text: t.length > MAX_INPUT_CHARS ? t.slice(0, MAX_INPUT_CHARS) : t }] }));
   const request = (withDims: boolean) =>
     client.models.embedContent({
       model,

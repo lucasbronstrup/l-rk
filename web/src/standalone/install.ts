@@ -2,12 +2,13 @@
  * Edição web: instala, ANTES de a aplicação carregar, interceptadores para tudo que começa com /api.
  *  - window.fetch      → backend local (Response reais: JSON, 204, SSE em ReadableStream, WAV em Blob);
  *  - window.EventSource → '/api/events' alimentado pelo barramento local;
- *  - window.WebSocket   → '/api/voice' responde que a voz ao vivo exige o Lärk instalado (a interface cai no modo clássico);
+ *  - window.WebSocket   → '/api/voice' vira uma ponte para o Gemini Live aberto direto do navegador (backend/live.ts);
  *  - <a download>       → no claude.ai, usa a capacidade "downloads" (o quadro bloqueia downloads diretos).
  * Qualquer outra URL segue para as implementações originais do navegador.
  */
 import type { LarkEvent, VoiceServerMessage } from '@shared/types';
 import { bus, handleApi, startBackend } from './backend';
+import { LiveVoiceBridge } from './backend/live';
 import { nativeFetch } from './backend/net';
 import { abortError } from './backend/util';
 
@@ -38,14 +39,40 @@ function urlOf(input: RequestInfo | URL): string {
 
 // ─── fetch ───────────────────────────────────────────────────────────────
 
-async function readBody(input: RequestInfo | URL, init: RequestInit | undefined, method: string): Promise<string | null> {
+interface ReadBody {
+  text: string | null;
+  blob: Blob | null;
+  contentType: string | null;
+}
+
+function headerOf(input: RequestInfo | URL, init: RequestInit | undefined, name: string): string | null {
+  try {
+    const fromInit = init?.headers ? new Headers(init.headers).get(name) : null;
+    if (fromInit) return fromInit;
+    return input instanceof Request ? input.headers.get(name) : null;
+  } catch {
+    return null;
+  }
+}
+
+const isBinaryType = (t: string | null) => Boolean(t && /^(audio|video|image)\/|^application\/octet-stream/i.test(t));
+
+/** Corpo como texto (JSON) ou, para áudio e outros binários, como Blob intacto. */
+async function readBody(input: RequestInfo | URL, init: RequestInit | undefined, method: string): Promise<ReadBody> {
+  let contentType = headerOf(input, init, 'content-type');
   const body = init?.body;
   if (body !== undefined && body !== null) {
-    if (typeof body === 'string') return body;
-    return new Response(body).text();
+    if (typeof body === 'string') return { text: body, blob: null, contentType };
+    const blob = body instanceof Blob ? body : await new Response(body).blob();
+    contentType = contentType || blob.type || null;
+    if (isBinaryType(contentType) || isBinaryType(blob.type)) return { text: null, blob, contentType };
+    return { text: await blob.text(), blob, contentType };
   }
-  if (input instanceof Request && method !== 'GET' && method !== 'HEAD') return input.clone().text();
-  return null;
+  if (input instanceof Request && method !== 'GET' && method !== 'HEAD') {
+    if (isBinaryType(contentType)) return { text: null, blob: await input.clone().blob(), contentType };
+    return { text: await input.clone().text(), blob: null, contentType };
+  }
+  return { text: null, blob: null, contentType };
 }
 
 async function localFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -54,8 +81,16 @@ async function localFetch(input: RequestInfo | URL, init?: RequestInit): Promise
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined) ?? undefined;
   if (signal?.aborted) throw abortError();
-  const bodyText = await readBody(input, init, method);
-  const pending = handleApi({ method, path: target.path, query: target.query, bodyText, signal });
+  const body = await readBody(input, init, method);
+  const pending = handleApi({
+    method,
+    path: target.path,
+    query: target.query,
+    bodyText: body.text,
+    bodyBlob: body.blob,
+    contentType: body.contentType,
+    signal,
+  });
   if (!signal) return pending;
   return new Promise<Response>((resolve, reject) => {
     const onAbort = () => reject(abortError());
@@ -142,10 +177,12 @@ class LocalEventSource extends EventTarget {
 
 // ─── WebSocket (/api/voice) ──────────────────────────────────────────────
 
-const LIVE_UNAVAILABLE = 'O modo de voz ao vivo precisa do Lärk instalado no computador. Usando o modo clássico.';
-
 type WsHandler<E extends Event> = ((this: WebSocket, ev: E) => unknown) | null;
 
+/**
+ * WebSocket falso de /api/voice: cada conexão é uma ponte para o Gemini Live aberto direto
+ * do navegador (backend/live.ts), com o mesmo protocolo do servidor do PC.
+ */
 class LocalVoiceSocket extends EventTarget {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -165,15 +202,26 @@ class LocalVoiceSocket extends EventTarget {
   onmessage: WsHandler<MessageEvent> = null;
   onclose: WsHandler<CloseEvent> = null;
   onerror: WsHandler<Event> = null;
+  private readonly bridge: LiveVoiceBridge;
 
   constructor(url: string) {
     super();
     this.url = url;
+    this.bridge = new LiveVoiceBridge({
+      json: (msg: VoiceServerMessage) => this.deliver(JSON.stringify(msg)),
+      audio: (pcm: ArrayBuffer) => this.deliver(this.binaryType === 'arraybuffer' ? pcm : new Blob([pcm])),
+      close: (code, reason) => this.close(code, reason),
+    });
     window.setTimeout(() => {
       if (this.readyState !== 0) return;
       this.readyState = 1;
       this.fire(new Event('open'));
-    }, 30);
+    }, 0);
+  }
+
+  private deliver(data: string | ArrayBuffer | Blob) {
+    if (this.readyState !== 1) return;
+    this.fire(new MessageEvent('message', { data }));
   }
 
   private fire(ev: Event) {
@@ -190,25 +238,16 @@ class LocalVoiceSocket extends EventTarget {
   }
 
   send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
-    if (this.readyState !== 1 || typeof data !== 'string') return;
-    let type = '';
-    try {
-      type = String((JSON.parse(data) as { type?: unknown }).type ?? '');
-    } catch {
-      return;
+    if (this.readyState !== 1) return;
+    if (typeof data === 'string' || data instanceof Blob || data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      this.bridge.handleClient(data);
     }
-    if (type !== 'start') return;
-    window.setTimeout(() => {
-      if (this.readyState !== 1) return;
-      const msg: VoiceServerMessage = { type: 'error', code: 'provider', message: LIVE_UNAVAILABLE };
-      this.fire(new MessageEvent('message', { data: JSON.stringify(msg) }));
-      this.close(1000, 'web_edition');
-    }, 60);
   }
 
   close(code = 1000, reason = '') {
     if (this.readyState === 2 || this.readyState === 3) return;
     this.readyState = 3;
+    this.bridge.dispose();
     window.setTimeout(() => this.fire(new CloseEvent('close', { code, reason, wasClean: true })), 0);
   }
 }

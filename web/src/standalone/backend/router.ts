@@ -34,7 +34,9 @@ import {
 } from './db';
 import { GEMINI_VOICES, getDeviceVitals } from './device';
 import { geminiTts } from './gemini';
+import { LIVE_MODELS } from './live';
 import { sseResponse } from './sse';
+import { transcribeRoute } from './transcribe';
 import { HttpError, badRequest, emptyResponse, errorResponse, isRecord, jsonResponse, notFound } from './util';
 
 export const VERSION = '0.1.0-web';
@@ -45,6 +47,9 @@ export interface ApiRequest {
   path: string;
   query: URLSearchParams;
   bodyText: string | null;
+  /** Corpo binário (ex.: áudio em POST /api/transcribe), quando a requisição não enviou texto. */
+  bodyBlob?: Blob | null;
+  contentType?: string | null;
   signal?: AbortSignal;
 }
 
@@ -54,6 +59,9 @@ const MODELS: ModelInfo[] = [
   { id: 'gemini-3.5-flash-lite', displayName: 'Gemini 3.5 Flash-Lite', roles: ['chat', 'fast'] },
   { id: 'gemini-3.8-flash-tts', displayName: 'Gemini 3.8 Flash TTS', roles: ['tts'] },
   { id: 'gemini-3.1-flash-tts-preview', displayName: 'Gemini 3.1 Flash TTS (prévia)', roles: ['tts'] },
+  { id: LIVE_MODELS[0], displayName: 'Gemini 3.8 Live', roles: ['live'] },
+  { id: LIVE_MODELS[1], displayName: 'Gemini 3.1 Flash Live (prévia)', roles: ['live'] },
+  { id: LIVE_MODELS[2], displayName: 'Gemini 2.5 Flash Native Audio', roles: ['live'] },
 ];
 
 function parseBody(text: string | null): Record<string, unknown> {
@@ -281,6 +289,10 @@ async function dispatch(req: ApiRequest): Promise<Response> {
         if (!blob) return emptyResponse(204);
         return new Response(blob, { status: 200, headers: { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' } });
       }
+      break;
+
+    case 'transcribe':
+      if (is('POST', 1)) return jsonResponse(await transcribeRoute(req.bodyBlob ?? null, req.contentType ?? null, req.signal));
       break;
 
     case 'voices':
