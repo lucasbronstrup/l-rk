@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#030303" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Lärk — seu assistente pessoal com memória permanente, voz humanizada e acesso ao seu computador."
+    />
+    <meta name="application-name" content="Lärk" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Lärk" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="mask-icon" href="/favicon.svg" color="#ff1e3c" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>Lärk</title>
+    <style>
+      /* Evita o clarão branco antes do CSS principal carregar. */
+      html,
+      body {
+        margin: 0;
+        background: #030303;
+        color: #f4eeee;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="font-family: system-ui, sans-serif; padding: 2rem; text-align: center">
+        O Lärk precisa de JavaScript ativado para funcionar.
+      </p>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

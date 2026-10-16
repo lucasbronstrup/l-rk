@@ -17,7 +17,9 @@ export function HudPanel({ title, code, icon, actions, className, bodyClassName,
   return (
     <section
       className={cn(
-        'hud-panel relative flex min-h-0 flex-col border border-line bg-surface/70 backdrop-blur-md',
+        // Sem backdrop-filter: com o fundo animado, o desfoque seria recalculado a cada quadro em todos
+        // os painéis (custo alto de GPU). Um fundo quase opaco dá a mesma leitura.
+        'hud-panel relative flex min-h-0 flex-col border border-line bg-surface/[0.86]',
         className,
       )}
     >
