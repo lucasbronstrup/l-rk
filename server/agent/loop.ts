@@ -28,6 +28,7 @@ import { newId } from '../lib/ids.js';
 import {
   GeminiError,
   classifyGeminiError,
+  cooldownModel,
   getClient,
   getModelFallbacks,
   isRetryableModelError,
@@ -49,9 +50,21 @@ import type { ChatMessage, ChatStreamEvent, MessageKind, ToolCallInfo } from '..
 export const MAX_TOOL_ITERATIONS = 8;
 /** Quantos modelos tentar (o escolhido + reservas) antes de desistir. */
 const MAX_MODEL_ATTEMPTS = 4;
-/** Sem nenhum pedaço da resposta por este tempo, a tentativa é abandonada. */
-const FIRST_CHUNK_TIMEOUT_MS = 90_000;
+/**
+ * Sem nenhum pedaço da resposta por este tempo, a tentativa é abandonada. Com pensamento visível o
+ * primeiro pedaço chega em poucos segundos; um modelo sobrecarregado às vezes fica mudo em vez de
+ * devolver 503, então as tentativas com reserva desistem antes (a última espera mais).
+ */
+const FIRST_CHUNK_TIMEOUT_MS = 40_000;
+const LAST_ATTEMPT_FIRST_CHUNK_TIMEOUT_MS = 90_000;
 const IDLE_CHUNK_TIMEOUT_MS = 90_000;
+/** Modelo que ficou mudo além do limite fica em espera por este tempo. */
+const SILENT_MODEL_COOLDOWN_MS = 5 * 60_000;
+/** LARK_DEBUG=1 registra os tempos de cada etapa do turno no console. */
+const DEBUG = process.env.LARK_DEBUG === '1';
+const debugLog = (message: string) => {
+  if (DEBUG) console.log(`[agente] ${message}`);
+};
 /** Assinatura aceita pelo Gemini quando a original não pode ser reaproveitada (troca de modelo no meio do turno). */
 const SKIP_SIGNATURE = 'skip_thought_signature_validator';
 const MAX_USER_TEXT = 32_000;
@@ -197,7 +210,9 @@ async function openStream(
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     beforeAttempt?.(model);
-    const idle = createIdleGuard(FIRST_CHUNK_TIMEOUT_MS, IDLE_CHUNK_TIMEOUT_MS);
+    const isLast = i === models.length - 1;
+    const idle = createIdleGuard(isLast ? LAST_ATTEMPT_FIRST_CHUNK_TIMEOUT_MS : FIRST_CHUNK_TIMEOUT_MS, IDLE_CHUNK_TIMEOUT_MS);
+    const started = Date.now();
     const abortSignal = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal;
     const modelConfig: GenerateContentConfig = {
       ...baseConfig,
@@ -209,12 +224,15 @@ async function openStream(
       const stream = await ai.models.generateContentStream({ model, contents, config: modelConfig });
       const iterator = stream[Symbol.asyncIterator]();
       const first = await iterator.next();
+      debugLog(`${model}: primeiro pedaço em ${Date.now() - started} ms`);
       return { model, iterator, first, idle };
     } catch (error) {
       idle.clear();
       if (signal?.aborted) throw abortReason(signal);
       if (idle.fired) {
         lastError = idle.signal.reason;
+        cooldownModel(model, SILENT_MODEL_COOLDOWN_MS);
+        console.warn(`[agente] ${model} ficou sem responder por ${Math.round((Date.now() - started) / 1000)} s; tentando o próximo modelo.`);
         continue;
       }
       if (!noThinkingModels.has(model) && isThinkingUnsupported(error)) {
@@ -406,11 +424,13 @@ async function runGeminiTurn(ctx: GeminiTurnContext): Promise<void> {
   const { ai, state, emit, signal } = ctx;
   const history = listMessages(ctx.conversationId, { limit: HISTORY_WINDOW });
   const contents = toGeminiHistory(history);
+  const contextStarted = Date.now();
   const systemInstruction = await buildSystemInstruction({
     conversationId: ctx.conversationId,
     mode: ctx.mode,
     query: memoryQuery(ctx.userText, history),
   });
+  debugLog(`contexto montado em ${Date.now() - contextStarted} ms (${systemInstruction.length} caracteres)`);
   if (signal?.aborted) throw abortReason(signal);
 
   const declarations = getToolDeclarations(ctx.mode);
@@ -465,7 +485,12 @@ async function runGeminiTurn(ctx: GeminiTurnContext): Promise<void> {
 
     pendingTextBreak = iteration > 0;
     pendingThoughtBreak = iteration > 0;
+    const roundStarted = Date.now();
     const round = await streamRound(opened, { onThought, onText });
+    debugLog(
+      `rodada ${iteration + 1} (${opened.model}): ${Date.now() - roundStarted} ms, ${round.text.length} caracteres, ` +
+        `ferramentas: ${round.calls.map((c) => c.name).join(', ') || 'nenhuma'}, fim: ${round.finishReason ?? '?'}`,
+    );
     if (round.text.trim()) roundsWithText++;
 
     if (round.calls.length === 0) {

@@ -7,6 +7,7 @@
  *   "meu nome é X" → remember · "lembre-se que …" → remember · "lembra de mim?" → recall
  *   "me lembra de …" / "lembrete" → create_reminder (+1 h) · "prometo …" / "vou …" → create_commitment
  *   "computador" / "sistema" → system_status
+ *   "execute o comando `…`" → run_command (ação perigosa: passa pela aprovação do usuário)
  */
 import { runTool } from '../tools/index.js';
 import { getSettings } from '../memory/settings.js';
@@ -96,7 +97,34 @@ const REMINDER_RE =
   /\b(?:me lembr[ae]|lembre-me|me avis[ae]|avise-me|cri[ae] um lembrete|lembrete)\b\s*(?:de|para|pra|que|sobre|:)?\s*(.*)/iu;
 const COMMITMENT_RE = /\b(?:prometo(?:\s+que)?|vou|preciso|tenho que)\s+(.+)/iu;
 const GREETING_RE = /^\s*(?:oi|olá|ola|e a[ií]|eae|bom dia|boa tarde|boa noite|hey|salve)(?!\p{L})/iu;
+/** "execute/rode o comando X" — o comando pode vir entre crases ou aspas. */
+const COMMAND_RE = /\b(?:execute|executa|rode|roda|rodar|executar)\s+(?:o\s+)?comando\s*:?\s*(?:`([^`]+)`|"([^"]+)"|“([^”]+)”|(.+))$/iu;
 const SYSTEM_RE = /\b(?:computador|sistema|máquina|maquina|cpu|processador|desempenho)\b/iu;
+
+const NUMBER_WORDS: Record<string, number> = {
+  um: 1, uma: 1, dois: 2, duas: 2, três: 3, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9,
+  dez: 10, quinze: 15, vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, meia: 0.5,
+};
+const DELAY_RE =
+  /\s*,?\s*(?:daqui a|daqui|em|dentro de)\s+(\d+(?:[.,]\d+)?|um|uma|dois|duas|tr[eê]s|quatro|cinco|seis|sete|oito|nove|dez|quinze|vinte|trinta|quarenta|cinquenta|meia)\s+(minutos?|min|horas?|h)\b/iu;
+
+/**
+ * Separa um prazo relativo simples ("daqui a uma hora", "em 10 minutos") do texto do lembrete.
+ * Devolve o texto sem o prazo e o atraso em minutos (null se não houver prazo reconhecível).
+ */
+export function extractRelativeDelay(clause: string): { clause: string; minutes: number | null } {
+  const m = DELAY_RE.exec(clause);
+  if (!m) return { clause, minutes: null };
+  const raw = m[1].toLocaleLowerCase('pt-BR');
+  const amount = NUMBER_WORDS[raw] ?? Number(raw.replace(',', '.'));
+  if (!Number.isFinite(amount) || amount <= 0) return { clause, minutes: null };
+  const minutes = /^h/i.test(m[2]) ? amount * 60 : amount;
+  const rest = (clause.slice(0, m.index) + clause.slice(m.index + m[0].length))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:de|para|pra|que|sobre)\s+/iu, '');
+  return { clause: rest, minutes: Math.max(1, Math.round(minutes)) };
+}
 
 /**
  * Ações de ferramentas que o modo demonstração executa para a mensagem (no máximo três).
@@ -124,8 +152,9 @@ export function planMockActions(userText: string, now: Date = new Date(), tz: st
 
   const reminder = !fact ? REMINDER_RE.exec(text) : null;
   if (reminder) {
-    const what = capitalize(cleanClause(reminder[1] || '')) || 'Lembrete pedido na conversa';
-    const due = new Date(now.getTime() + 60 * 60_000);
+    const { clause, minutes } = extractRelativeDelay(reminder[1] || '');
+    const what = capitalize(cleanClause(clause)) || 'Lembrete pedido na conversa';
+    const due = new Date(now.getTime() + (minutes ?? 60) * 60_000);
     actions.push({ name: 'create_reminder', args: { text: what, due_at: describeNow(tz, due).iso, recurrence: 'none' } });
   } else {
     const promise = text.includes('?') ? null : COMMITMENT_RE.exec(text);
@@ -141,6 +170,13 @@ export function planMockActions(userText: string, now: Date = new Date(), tz: st
         args: { description: capitalize(clause), ...(dueAt ? { due_at: dueAt } : {}) },
       });
     }
+  }
+
+  const command = COMMAND_RE.exec(text);
+  const commandText = command ? (command[1] ?? command[2] ?? command[3] ?? command[4] ?? '').trim() : '';
+  if (commandText) {
+    actions.push({ name: 'run_command', args: { command: commandText } });
+    return actions.slice(0, 3);
   }
 
   if (SYSTEM_RE.test(text)) actions.push({ name: 'system_status', args: {} });
@@ -164,7 +200,7 @@ function sentenceFor(call: ToolCallInfo): string {
   if (call.status !== 'done') return `Tentei uma ação (${call.label.toLowerCase()}), mas ela falhou: ${summary || 'motivo desconhecido'}.`;
   switch (call.name) {
     case 'create_reminder':
-      return `${summary}. Daqui a uma hora, eu te chamo.`;
+      return `${summary}. Na hora certa, eu te chamo.`;
     case 'create_commitment':
       return `${summary}. E eu vou cobrar — com carinho, mas vou.`;
     case 'remember':
@@ -173,6 +209,8 @@ function sentenceFor(call: ToolCallInfo): string {
       return `Consultei a memória: ${summary.charAt(0).toLocaleLowerCase('pt-BR')}${summary.slice(1)}.`;
     case 'system_status':
       return `Diagnóstico da máquina: ${summary}.`;
+    case 'run_command':
+      return `Comando executado com a sua autorização: ${summary.replace(/[.\s]+$/u, '')}.`;
     default:
       return `${call.label}: ${summary}.`;
   }
@@ -202,7 +240,7 @@ function composeReply(userText: string, calls: ToolCallInfo[], mode: 'text' | 'v
       ? REFLECTIONS.reminder
       : names.has('remember') || names.has('recall')
         ? REFLECTIONS.memory
-        : names.has('system_status')
+        : names.has('system_status') || names.has('run_command')
           ? REFLECTIONS.system
           : calls.length === 0 && GREETING_RE.test(userText)
             ? REFLECTIONS.greeting

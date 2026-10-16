@@ -61,7 +61,10 @@
     "build": "npm run build:web && npm run build:server",
     "build:web": "vite build",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --target=node20 --outfile=dist/server/index.js",
-    "start": "NODE_ENV=production node dist/server/index.js",
+    "build:standalone": "vite build --config vite.standalone.config.ts",
+    "start": "node scripts/lark.mjs --no-open",
+    "lark": "node scripts/lark.mjs",
+    "autostart": "node scripts/autostart.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run"
   }

@@ -83,13 +83,13 @@ beforeEach(() => {
   fake.generate = null;
   fake.models = [
     { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', supportedActions: TEXT },
-    { name: 'models/gemini-3.1-flash', displayName: 'Gemini 3.1 Flash', supportedActions: TEXT },
+    { name: 'models/gemini-3.5-flash', displayName: 'Gemini 3.5 Flash', supportedActions: TEXT },
     { name: 'models/gemini-2.5-flash-lite', supportedActions: TEXT },
     { name: 'models/gemini-3.1-pro-preview', supportedActions: TEXT },
     { name: 'models/gemini-2.5-flash-preview-tts', supportedActions: ['generateContent', 'countTokens'] },
     { name: 'models/gemini-2.5-pro-preview-tts', supportedActions: ['generateContent'] },
     { name: 'models/gemini-embedding-001', supportedActions: ['embedContent', 'countTextTokens'] },
-    { name: 'models/gemini-live-2.5-flash-native-audio', supportedActions: ['bidiGenerateContent'] },
+    { name: 'models/gemini-2.5-flash-native-audio-latest', supportedActions: ['bidiGenerateContent'] },
     { name: 'models/imagen-4.0-generate-001', supportedActions: ['predict'] },
     { name: 'models/gemma-3-27b-it', supportedActions: TEXT },
     { name: 'models/gemini-2.5-flash-image', supportedActions: TEXT },
@@ -102,16 +102,27 @@ describe('inferModelRoles', () => {
     expect(inferModelRoles('gemini-2.5-flash', TEXT)).toEqual(['chat', 'fast']);
     expect(inferModelRoles('gemini-2.5-flash-preview-tts', ['generateContent'])).toEqual(['tts']);
     expect(inferModelRoles('gemini-embedding-001', ['embedContent'])).toEqual(['embedding']);
-    expect(inferModelRoles('gemini-live-2.5-flash-native-audio', ['bidiGenerateContent'])).toEqual(['live']);
+    expect(inferModelRoles('gemini-2.5-flash-native-audio-latest', ['bidiGenerateContent'])).toEqual(['live']);
+    expect(inferModelRoles('gemini-3.8-live', ['bidiGenerateContent'])).toEqual(['live']);
+    expect(inferModelRoles('gemini-embedding-2', ['embedContent'])).toEqual(['embedding']);
     expect(inferModelRoles('imagen-4.0-generate-001', ['predict'])).toEqual([]);
     expect(inferModelRoles('gemma-3-27b-it', TEXT)).toEqual([]);
     expect(inferModelRoles('gemini-2.5-flash-image', TEXT)).toEqual([]);
+  });
+
+  it('não trata modelos de transcrição, tradução, robótica ou música como conversa por voz', () => {
+    const bidi = ['bidiGenerateContent'];
+    expect(inferModelRoles('gemini-3.5-transcribe-live', bidi)).not.toContain('live');
+    expect(inferModelRoles('gemini-3.5-live-translate-preview', bidi)).not.toContain('live');
+    expect(inferModelRoles('gemini-robotics-er-2-streaming-preview', bidi)).not.toContain('live');
+    expect(inferModelRoles('lyria-realtime-exp', bidi)).not.toContain('live');
+    expect(inferModelRoles('gemini-3.5-transcribe', TEXT)).toEqual([]);
   });
 });
 
 describe('rankModelsForRole', () => {
   it('segue a lista de preferência', () => {
-    expect(rankModelsForRole('chat', ['gemini-2.5-flash', 'gemini-3.1-flash'])[0]).toBe('gemini-3.1-flash');
+    expect(rankModelsForRole('chat', ['gemini-2.5-flash', 'gemini-3.5-flash'])[0]).toBe('gemini-3.5-flash');
     expect(rankModelsForRole('fast', ['gemini-2.5-flash-lite', 'gemini-flash-lite-latest'])[0]).toBe('gemini-flash-lite-latest');
   });
 
@@ -134,7 +145,7 @@ describe('catálogo e resolução', () => {
     expect(ids).toContain('gemini-2.5-flash');
     expect(ids).not.toContain('imagen-4.0-generate-001');
     expect(ids).not.toContain('gemma-3-27b-it');
-    expect(list.find((m) => m.id === 'gemini-3.1-flash')?.displayName).toBe('Gemini 3.1 Flash');
+    expect(list.find((m) => m.id === 'gemini-3.5-flash')?.displayName).toBe('Gemini 3.5 Flash');
     await listAvailableModels();
     expect(fake.listCalls).toBe(1);
     await listAvailableModels(true);
@@ -142,11 +153,11 @@ describe('catálogo e resolução', () => {
   });
 
   it('resolve o melhor modelo disponível por função', async () => {
-    expect(await resolveModel('chat')).toBe('gemini-3.1-flash');
+    expect(await resolveModel('chat')).toBe('gemini-3.5-flash');
     expect(await resolveModel('fast')).toBe('gemini-2.5-flash-lite');
     expect(await resolveModel('tts')).toBe('gemini-2.5-flash-preview-tts');
     expect(await resolveModel('embedding')).toBe('gemini-embedding-001');
-    expect(await resolveModel('live')).toBe('gemini-live-2.5-flash-native-audio');
+    expect(await resolveModel('live')).toBe('gemini-2.5-flash-native-audio-latest');
   });
 
   it('respeita a escolha do usuário nas configurações', async () => {
@@ -177,7 +188,7 @@ describe('catálogo e resolução', () => {
 
   it('getActiveModels resolve todas as funções', async () => {
     const active = await getActiveModels();
-    expect(active).toMatchObject({ chat: 'gemini-3.1-flash', tts: 'gemini-2.5-flash-preview-tts' });
+    expect(active).toMatchObject({ chat: 'gemini-3.5-flash', tts: 'gemini-2.5-flash-preview-tts' });
   });
 });
 
@@ -186,7 +197,7 @@ describe('generateText', () => {
     const calls: string[] = [];
     fake.generate = async ({ model }) => {
       calls.push(model);
-      if (model === 'gemini-3.1-flash') {
+      if (model === 'gemini-3.5-flash') {
         throw apiError(429, {
           message: 'You exceeded your current quota',
           status: 'RESOURCE_EXHAUSTED',
@@ -196,9 +207,9 @@ describe('generateText', () => {
       return { text: `resposta de ${model}` };
     };
     await expect(generateText({ prompt: 'oi', system: 'seja breve' })).resolves.toBe('resposta de gemini-2.5-flash');
-    expect(calls).toEqual(['gemini-3.1-flash', 'gemini-2.5-flash']);
+    expect(calls).toEqual(['gemini-3.5-flash', 'gemini-2.5-flash']);
     expect(getModelFallbacks('chat')[0]).toBe('gemini-2.5-flash');
-    expect(getModelFallbacks('chat')).toContain('gemini-3.1-flash'); // continua como última opção
+    expect(getModelFallbacks('chat')).toContain('gemini-3.5-flash'); // continua como última opção
   });
 
   it('envia system instruction e JSON quando pedido', async () => {

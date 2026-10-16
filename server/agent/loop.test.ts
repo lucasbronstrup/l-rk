@@ -42,6 +42,15 @@ describe('planMockActions', () => {
     expect(action.args.due_at).toBe('2026-10-16T13:00:00-03:00');
   });
 
+  it('entende prazos relativos simples e tira o prazo do texto do lembrete', () => {
+    const [water] = planMockActions('Me lembre de beber água daqui a uma hora', now, tz);
+    expect(water.args.text).toBe('Beber água');
+    expect(water.args.due_at).toBe('2026-10-16T13:00:00-03:00');
+    const [call] = planMockActions('Me avisa em 15 minutos de ligar pra Ana', now, tz);
+    expect(call.args.text).toBe('Ligar pra Ana');
+    expect(call.args.due_at).toBe('2026-10-16T12:15:00-03:00');
+  });
+
   it('promessa com prazo amanhã', () => {
     const [action] = planMockActions('Prometo que vou estudar cálculo amanhã', now, tz);
     expect(action.name).toBe('create_commitment');
@@ -58,6 +67,7 @@ describe('planMockActions', () => {
     expect(planMockActions('Você lembra de mim?', now, tz)[0].name).toBe('recall');
     expect(planMockActions('Como está o computador?', now, tz).map((a) => a.name)).toEqual(['system_status']);
     expect(planMockActions('Qual a capital da França?', now, tz)).toEqual([]);
+    expect(planMockActions('Execute o comando `echo olá`', now, tz)).toEqual([{ name: 'run_command', args: { command: 'echo olá' } }]);
   });
 });
 
@@ -92,7 +102,7 @@ describe('runAgentTurn em modo demonstração', () => {
     expect(saved[1].id).toBe(message.id);
     expect(saved[1].toolCalls?.[0]).toMatchObject({ name: 'create_reminder', status: 'done' });
     expect(saved[1].thoughts).toMatch(/Modo demonstração/);
-    expect(message.content).toMatch(/Daqui a uma hora/);
+    expect(message.content).toMatch(/Na hora certa, eu te chamo/);
     // Título automático a partir da primeira fala.
     expect(getConversation(conversation.id)?.title).toBe('Me lembra de regar as plantas');
   });

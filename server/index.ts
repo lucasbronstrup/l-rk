@@ -77,6 +77,8 @@ if (serveWeb && fs.existsSync(webIndex)) {
   app.use('*', serveStatic({ root: config.webDist }));
   // Fallback de SPA: qualquer rota de página volta para o index.html.
   app.get('*', async (c) => {
+    // Arquivo inexistente (ex.: /assets/antigo.js de uma versão anterior) é 404, não a página.
+    if (/\.[a-z0-9]{1,8}$/i.test(c.req.path)) return c.text('Arquivo não encontrado.', 404);
     try {
       const html = await fs.promises.readFile(webIndex, 'utf8');
       c.header('Cache-Control', 'no-cache');

@@ -43,6 +43,8 @@ export interface BriefingData {
   todayReminders: Reminder[];
   overdue: Commitment[];
   dueToday: Commitment[];
+  /** Pendentes com prazo nos próximos dias (depois de hoje). */
+  upcoming: Commitment[];
   openWithoutDue: Commitment[];
 }
 
@@ -72,13 +74,16 @@ export function collectBriefingData(now: Date, settings: Settings): BriefingData
   const todayKey = localDateKey(now, tz);
   const overdue: Commitment[] = [];
   const dueToday: Commitment[] = [];
+  const upcoming: Commitment[] = [];
   const openWithoutDue: Commitment[] = [];
   for (const c of pending) {
     if (!c.dueAt) openWithoutDue.push(c);
     else if (new Date(c.dueAt).getTime() < now.getTime()) overdue.push(c);
     else if (localDateKey(new Date(c.dueAt), tz) === todayKey) dueToday.push(c);
+    else upcoming.push(c);
   }
-  return { greeting, period, todayReminders, overdue, dueToday, openWithoutDue };
+  upcoming.sort((a, b) => new Date(a.dueAt!).getTime() - new Date(b.dueAt!).getTime());
+  return { greeting, period, todayReminders, overdue, dueToday, upcoming, openWithoutDue };
 }
 
 // ─── Texto ───────────────────────────────────────────────────────────────
@@ -92,11 +97,19 @@ const INSIGHTS = [
   'A agenda mostra o que você planejou; as escolhas mostram quem você é.',
 ];
 
+/** Frase de abertura coerente com o período (um briefing às 21 h não fala em "começar o dia"). */
+const OPENINGS: Record<BriefingData['period'], string> = {
+  madrugada: 'A cidade dorme, mas a cabeça de quem constrói não. Deixa eu te dar o mapa.',
+  manhã: 'Antes de o dia começar a falar por você, deixa eu te dar o mapa.',
+  tarde: 'O dia já está em movimento; vamos conferir se ele está indo para onde você quer.',
+  noite: 'O dia ainda não acabou, e o que resta dele também conta. Deixa eu te dar o mapa.',
+};
+
 /** Briefing sem IA (modo demonstração, sem chave ou falha), curto e no tom do Lärk. */
 export function briefingTemplate(data: BriefingData, settings: Settings, now: Date): string {
   const tz = settings.timezone;
   const lines: string[] = [];
-  lines.push(`**${data.greeting}${vocative(settings)}.** Antes de o dia começar a falar por você, deixa eu te dar o mapa.`);
+  lines.push(`**${data.greeting}${vocative(settings)}.** ${OPENINGS[data.period]}`);
 
   if (data.todayReminders.length) {
     const items = data.todayReminders.slice(0, 4).map((r) => `- ${timeLabel(r.dueAt, tz)} — ${r.text}`);
@@ -109,7 +122,10 @@ export function briefingTemplate(data: BriefingData, settings: Settings, now: Da
   const promises: string[] = [];
   for (const c of data.overdue.slice(0, 3)) promises.push(`- ⚠️ ${c.description} (venceu ${friendlyDateTime(c.dueAt!, tz, now)})`);
   for (const c of data.dueToday.slice(0, 3)) promises.push(`- ${c.description} (até ${timeLabel(c.dueAt!, tz)})`);
-  if (!promises.length) for (const c of data.openWithoutDue.slice(0, 2)) promises.push(`- ${c.description}`);
+  if (!promises.length) {
+    for (const c of data.upcoming.slice(0, 2)) promises.push(`- ${c.description} (até ${friendlyDateTime(c.dueAt!, tz, now)})`);
+    for (const c of data.openWithoutDue.slice(0, 2)) promises.push(`- ${c.description}`);
+  }
   if (promises.length) lines.push(`**Promessas em jogo**\n${promises.join('\n')}`);
   else lines.push('**Promessas:** nenhuma pendente. Ótimo momento para assumir uma que valha a pena.');
 
@@ -117,9 +133,9 @@ export function briefingTemplate(data: BriefingData, settings: Settings, now: Da
   return lines.join('\n\n');
 }
 
-const BRIEFING_TASK = `Você está abrindo o dia do usuário com um briefing — como a abertura de uma grande palestra.
+const BRIEFING_TASK = `Você está abrindo o dia (ou o reencontro, se já for tarde ou noite) do usuário com um briefing — como a abertura de uma grande palestra.
 Escreva em português do Brasil, no MÁXIMO 150 palavras, nesta ordem:
-1. Saudação adequada à hora (use a saudação indicada) com uma frase de abertura que prenda a atenção;
+1. Saudação adequada à hora (use a saudação indicada) com uma frase de abertura que prenda a atenção e combine com o período (não fale em "começar o dia" à noite);
 2. A agenda de hoje (lembretes) em lista curta com horários — se não houver, diga isso com elegância;
 3. As promessas pendentes que importam (atrasadas primeiro), cobrando com tato;
 4. Um insight do dia: uma reflexão original e memorável que conecte com o que ele tem pela frente.
@@ -136,6 +152,7 @@ function briefingPrompt(data: BriefingData, settings: Settings, now: Date): stri
     `Lembretes de hoje:\n${fmtList(data.todayReminders.map((r) => `- ${timeLabel(r.dueAt, tz)} — ${r.text}`))}`,
     `Promessas atrasadas:\n${fmtList(data.overdue.map((c) => `- ${c.description} (prazo: ${friendlyDateTime(c.dueAt!, tz, now)})`))}`,
     `Promessas para hoje:\n${fmtList(data.dueToday.map((c) => `- ${c.description} (até ${timeLabel(c.dueAt!, tz)})`))}`,
+    `Promessas dos próximos dias:\n${fmtList(data.upcoming.slice(0, 5).map((c) => `- ${c.description} (prazo: ${friendlyDateTime(c.dueAt!, tz, now)})`))}`,
     `Promessas sem prazo:\n${fmtList(data.openWithoutDue.slice(0, 5).map((c) => `- ${c.description}`))}`,
   ]
     .filter(Boolean)

@@ -198,6 +198,11 @@ export function reportModelFailure(model: string, error: unknown): void {
   if (ms > 0) cooldowns.set(stripPrefix(model), Date.now() + ms);
 }
 
+/** Põe um modelo em espera por `ms` (ex.: ficou mudo além do limite, sem devolver erro HTTP). */
+export function cooldownModel(model: string, ms: number): void {
+  if (ms > 0) cooldowns.set(stripPrefix(model), Date.now() + ms);
+}
+
 function inCooldown(model: string): boolean {
   const until = cooldowns.get(model);
   if (until === undefined) return false;
@@ -241,23 +246,28 @@ export function getClient(): GoogleGenAI | null {
 
 /** Preferências por função, da melhor para a pior (todas com cota gratuita no AI Studio). */
 export const PREFERRED_MODELS: Readonly<Record<ModelRole, readonly string[]>> = Object.freeze({
-  chat: ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.1-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-2.5-flash'],
-  fast: [
-    'gemini-3.8-flash-lite',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-2.5-flash-lite',
+  // IDs conferidos com models.list (ver "Fatos verificados" no ARCHITECTURE.md). O 3.8 costuma dar 503
+  // em horários de pico: o fallback segue para as versões anteriores.
+  chat: [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-flash-latest',
+    'gemini-2.5-flash',
   ],
+  fast: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite'],
   // Nunca "pro": o TTS pro exige faturamento.
   tts: ['gemini-3.8-flash-tts', 'gemini-3.1-flash-tts-preview', 'gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'],
   live: [
     'gemini-3.8-live',
     'gemini-3.1-flash-live-preview',
-    'gemini-live-2.5-flash-native-audio',
+    'gemini-2.5-flash-native-audio-latest',
     'gemini-2.5-flash-native-audio-preview-12-2025',
+    'gemini-3.8-live-extended-thinking',
   ],
-  embedding: ['gemini-embedding-002', 'gemini-embedding-001'],
+  embedding: ['gemini-embedding-2', 'gemini-embedding-001'],
 });
 
 const ROLES: ModelRole[] = ['chat', 'fast', 'tts', 'live', 'embedding'];
@@ -267,7 +277,10 @@ const MODEL_LIST_TIMEOUT_MS = 15_000;
 
 /** Famílias que não servem para conversa em texto. */
 const NON_TEXT_PATTERN =
-  /image|tts|live|audio|embedding|aqa|imagen|veo|learnlm|robotics|computer-use|gemma|lyria|banana|deep-research|antigravity/;
+  /image|tts|live|audio|embedding|aqa|imagen|veo|learnlm|robotics|computer-use|gemma|lyria|banana|deep-research|antigravity|transcribe|translate/;
+
+/** Modelos com bidiGenerateContent que não conversam (só transcrevem, traduzem, controlam robôs ou fazem música). */
+const NON_CONVERSATIONAL_LIVE_PATTERN = /transcribe|translate|robotics|lyria|music/;
 
 let modelCache: { key: string; at: number; models: ModelInfo[] } | null = null;
 let listFailure: { key: string; at: number; error: unknown } | null = null;
@@ -282,7 +295,8 @@ export function inferModelRoles(id: string, supportedActions: readonly string[] 
   const name = id.toLowerCase();
   const actions = new Set(supportedActions);
   const roles: ModelRole[] = [];
-  const live = actions.has('bidiGenerateContent') || /live|native-audio/.test(name);
+  const live =
+    (actions.has('bidiGenerateContent') || /live|native-audio/.test(name)) && !NON_CONVERSATIONAL_LIVE_PATTERN.test(name);
   const tts = /tts/.test(name);
   const embedding = actions.has('embedContent') || actions.has('batchEmbedContents') || /embedding/.test(name);
   if (live && !tts && !embedding) roles.push('live');
