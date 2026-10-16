@@ -44,6 +44,11 @@ function standaloneOutput(): Plugin {
       await fs.rm(built, { force: true });
       // O manifest PWA usa caminhos absolutos ("/"): não serve num subcaminho.
       await fs.rm(path.join(outDir, 'manifest.webmanifest'), { force: true });
+      // Bibliotecas de markdown trazem U+FFFD literal dentro de strings; o publicador do Artifact
+      // recusa esse caractere, então ele vira a sequência de escape equivalente (�).
+      const js = path.join(outDir, 'assets/lark.js');
+      const code = await fs.readFile(js, 'utf8');
+      if (code.includes('�')) await fs.writeFile(js, code.replaceAll('�', '\\uFFFD'));
     },
   };
 }
