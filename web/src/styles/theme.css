@@ -1,0 +1,61 @@
+/* Lärk — tokens de design (preto + vermelho). Fonte da verdade das cores e fontes.
+ * Use as classes geradas pelo Tailwind v4: bg-void, bg-surface, text-ink, text-muted,
+ * border-line, text-red, bg-red, shadow-glow, font-display, font-hud, font-mono... */
+@import 'tailwindcss';
+
+@theme {
+  /* Fundo e superfícies */
+  --color-void: #030303;
+  --color-abyss: #070708;
+  --color-surface: #0d0d0f;
+  --color-elevated: #141417;
+  --color-raised: #1b1b1f;
+
+  /* Vermelho Lärk */
+  --color-red: #ff1e3c;
+  --color-red-bright: #ff4b5f;
+  --color-red-soft: #ff7a88;
+  --color-red-deep: #b0102a;
+  --color-red-dark: #5c0715;
+  --color-ember: #ff6b3d;
+
+  /* Texto */
+  --color-ink: #f4eeee;
+  --color-muted: #a39597;
+  --color-dim: #5f5557;
+
+  /* Linhas */
+  --color-line: rgb(255 30 60 / 0.16);
+  --color-line-strong: rgb(255 30 60 / 0.38);
+  --color-line-neutral: rgb(255 255 255 / 0.07);
+
+  /* Estados */
+  --color-ok: #3ddc97;
+  --color-warn: #ffb020;
+
+  --font-display: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
+  --font-hud: 'Rajdhani', 'Inter Variable', system-ui, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --shadow-glow: 0 0 24px rgb(255 30 60 / 0.35), 0 0 2px rgb(255 30 60 / 0.8);
+  --shadow-glow-sm: 0 0 10px rgb(255 30 60 / 0.3);
+  --shadow-glow-lg: 0 0 60px rgb(255 30 60 / 0.35), 0 0 120px rgb(255 30 60 / 0.15);
+
+  --animate-pulse-red: pulse-red 2.4s ease-in-out infinite;
+  --animate-spin-slow: spin 18s linear infinite;
+  --animate-spin-rev: spin-rev 26s linear infinite;
+  --animate-flicker: flicker 4s linear infinite;
+
+  @keyframes pulse-red {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+  @keyframes spin-rev {
+    to { transform: rotate(-360deg); }
+  }
+  @keyframes flicker {
+    0%, 19%, 21%, 62%, 64%, 100% { opacity: 1; }
+    20%, 63% { opacity: 0.6; }
+  }
+}
